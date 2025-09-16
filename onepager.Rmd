@@ -2,38 +2,107 @@
 title: "Ihr persönliches Ergebnis"
 output:
   html_document:
+    self_contained: true
     toc: false
-    theme: cosmo
+    theme: readable
 params:
   ergebnis: !r data.frame()
+  photo_url: ""
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
-                      fig.width = 7, fig.height = 4, dpi = 120)
+knitr::opts_chunk$set(echo = FALSE, fig.align = "center", fig.width = 8, fig.height = 5)
 
-# Hilfsfunktion: sichere Spalten-Auswahl
-getcol <- function(df, name, default=NA_real_) {
-  if (name %in% names(df)) as.numeric(df[[name]]) else default
-}
-
+# Eingabedaten (eine Zeile)
 df <- params$ergebnis
 stopifnot(nrow(df) >= 1)
 
-# Kernkennzahlen
-teilnehmer_id         <- as.character(getcol(df, "ID", ""))
-unternehmerfaehigkeit <- getcol(df, "Unternehmerfaehigkeit")
-leistungsmotivation   <- getcol(df, "Leistungsmotivation")
+# Werte entpacken
+teilnehmer_id <- as.character(df$ID[1])
+uf <- as.numeric(df$Unternehmerfaehigkeit[1])
+lm <- as.numeric(df$Leistungsmotivation[1])
 
-# Rollen-Namen laut API
-rollen_namen <- c(
+roles <- c(
   "Verkaeufer","Finance_Coordinator","Captain","Pioneer",
   "Netzwerker","Operator","Productlead","Business_Developer"
 )
+role_vals <- as.numeric(df[1, roles])
+names(role_vals) <- c("Verkäufer","Finance\nCoordinator","Captain","Pioneer",
+                      "Netzwerker","Operator","Product Lead","Business\nDeveloper")
 
-# Rollenwerte als benannte Zahl
-rollen <- sapply(rollen_namen, function(nm) getcol(df, nm))
-names(rollen) <- rollen_namen
+dom <- as.character(df$Dominante_Rolle[1])
 
-# Dominante Rolle (falls mitgeliefert)
-dominante_rolle <- if ("Dominante_Rolle" %in% names(df)) as.character(df$Dominante_Rolle[1]) else NA_character_
+# ---------- kleine Hilfen ----------
+
+clamp <- function(x, lo, hi) pmax(lo, pmin(hi, x))
+
+# Radar/Spinnen-Plot ohne Zusatzpakete (Base R)
+spider_plot <- function(vals, labels, maxv = 100,
+                        grid_steps = 5, title = "", col_fill = "#3B82F6") {
+  n <- length(vals)
+  # Winkel (0 bis 2*pi, letzter Punkt wieder zum ersten)
+  ang <- seq(0, 2*pi, length.out = n + 1)[1:n]
+  r <- clamp(vals / maxv, 0, 1)
+
+  x <- r * cos(ang)
+  y <- r * sin(ang)
+
+  # Zeichenfläche
+  plot(0, 0, type = "n", xlim = c(-1.2, 1.2), ylim = c(-1.2, 1.2),
+       axes = FALSE, xlab = "", ylab = "", asp = 1, main = title, cex.main = 1.2)
+
+  # Gitter (Kreise + Speichen)
+  gr <- seq(0, 1, length.out = grid_steps + 1)[-1]
+  for (g in gr) symbols(0, 0, circles = g, inches = FALSE, add = TRUE,
+                        fg = "#e5e7eb") # hellgrau
+  for (i in seq_len(n)) {
+    segments(0, 0, cos(ang[i]), sin(ang[i]), col = "#e5e7eb")
+  }
+
+  # Fläche + Umrandung
+  polygon(c(x, x[1]), c(y, y[1]),
+          border = "#1f2937", col = adjustcolor(col_fill, alpha.f = 0.25), lwd = 2)
+
+  # Punkte
+  points(x, y, pch = 16, col = col_fill)
+
+  # Labels außen
+  lab_r <- 1.1
+  text(lab_r * cos(ang), lab_r * sin(ang), labels, cex = 0.9)
+}
+
+# Einfache "KI"-Beschreibung (regelbasiert)
+describe_profile <- function(dom, uf, lm) {
+  dom_text <- switch(dom,
+    "Verkaeufer"          = "kundenorientiert, überzeugungsstark und vertriebsaffin",
+    "Finance_Coordinator" = "strukturiert, zahlenstark und prozesssicher",
+    "Captain"             = "führungsstark, entscheidungsfreudig und klar in der Linie",
+    "Pioneer"             = "innovationsgetrieben, experimentierfreudig und zukunftsorientiert",
+    "Netzwerker"          = "verbindend, kommunikativ und stark im Beziehungsaufbau",
+    "Operator"            = "operativ exzellent, verlässlich und qualitätsgetrieben",
+    "Productlead"         = "produktfokussiert, analytisch und nutzerzentriert",
+    "Business_Developer"  = "wachstumsorientiert, strategisch und marktbeobachtend",
+    "ausgewogen"
+  )
+
+  uf_text <- if (uf >= 4.0) {
+    "Ihre unternehmerische Selbstwirksamkeit ist **sehr hoch** – Sie gehen Themen mutig und eigenverantwortlich an."
+  } else if (uf >= 3.0) {
+    "Ihre unternehmerische Selbstwirksamkeit ist **solide** – Sie agieren zuverlässig und pragmatisch."
+  } else {
+    "Ihre unternehmerische Selbstwirksamkeit ist aktuell **zurückhaltend** – Fokus auf Lernkurve & Erfahrung zahlt sich aus."
+  }
+
+  lm_text <- if (lm >= 4.0) {
+    "Ihre Leistungsmotivation ist **sehr hoch** – Sie suchen aktiv Herausforderung und klare Ziele."
+  } else if (lm >= 3.0) {
+    "Ihre Leistungsmotivation ist **stabil** – Sie arbeiten zielorientiert und kontinuierlich."
+  } else {
+    "Ihre Leistungsmotivation ist **moderat** – ein klarer Purpose & gute Rahmenbedingungen heben das Niveau."
+  }
+
+  paste0(
+    "Sie zeigen ein Profil vom Typ **", gsub("_", " ", dom), "**: ", dom_text, ". ",
+    uf_text, " ", lm_text
+  )
+}
