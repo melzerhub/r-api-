@@ -1,9 +1,39 @@
 ---
 title: "Ihr persönliches Ergebnis"
-output: html_document
+output:
+  html_document:
+    toc: false
+    theme: cosmo
 params:
   ergebnis: !r data.frame()
 ---
 
 ```{r setup, include=FALSE}
-ergebnis <- params$ergebnis
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
+                      fig.width = 7, fig.height = 4, dpi = 120)
+
+# Hilfsfunktion: sichere Spalten-Auswahl
+getcol <- function(df, name, default=NA_real_) {
+  if (name %in% names(df)) as.numeric(df[[name]]) else default
+}
+
+df <- params$ergebnis
+stopifnot(nrow(df) >= 1)
+
+# Kernkennzahlen
+teilnehmer_id         <- as.character(getcol(df, "ID", ""))
+unternehmerfaehigkeit <- getcol(df, "Unternehmerfaehigkeit")
+leistungsmotivation   <- getcol(df, "Leistungsmotivation")
+
+# Rollen-Namen laut API
+rollen_namen <- c(
+  "Verkaeufer","Finance_Coordinator","Captain","Pioneer",
+  "Netzwerker","Operator","Productlead","Business_Developer"
+)
+
+# Rollenwerte als benannte Zahl
+rollen <- sapply(rollen_namen, function(nm) getcol(df, nm))
+names(rollen) <- rollen_namen
+
+# Dominante Rolle (falls mitgeliefert)
+dominante_rolle <- if ("Dominante_Rolle" %in% names(df)) as.character(df$Dominante_Rolle[1]) else NA_character_
