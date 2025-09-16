@@ -2,11 +2,5 @@
 title: "Ihr persönliches Ergebnis"
 output: html_document
 params:
-  participant_id: "NA"
-  data: !r data.frame()
+  ergebnis: !r data.frame()
 ---
-
-```{r setup, include=FALSE}
-library(ggplot2)
-df <- params$data
-score <- df$score[1]
