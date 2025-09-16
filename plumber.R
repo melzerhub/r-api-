@@ -1,42 +1,57 @@
 # plumber.R
+# ─────────────────────────────────────────────────────────────────────────────
+# Pakete
 library(plumber)
 library(jsonlite)
 library(base64enc)
 library(rmarkdown)
 
-`%||%` <- function(a, b) if (is.null(a) || is.na(a)) b else a
+# ─────────────────────────────────────────────────────────────────────────────
+# kleine Helfer
+is_blank <- function(x) {
+  is.null(x) || identical(x, "") || length(x) == 0 || (length(x) == 1 && is.na(x))
+}
+`%||%` <- function(a, b) if (is_blank(a)) b else a
 
-# ---- Analysefunktion (robust) ----
+to_num <- function(x) suppressWarnings(as.numeric(x))
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Kernanalyse (nimmt JSON-String ODER bereits geparstes list)
 analyze_payload <- function(req_json) {
   payload <- if (is.list(req_json)) req_json else jsonlite::fromJSON(req_json)
 
   if (is.null(payload$data) || length(payload$data) < 1)
     stop("Payload hat kein 'data' mit mindestens einem Eintrag.")
 
+  # Wir erwarten genau einen Datensatz im Array data[[1]]
   df <- as.data.frame(payload$data[[1]], stringsAsFactors = FALSE)
   df$ID <- payload$participant_id %||% "anon"
 
+  # erwartete Spalten
   U_names <- paste0("U", 1:22)
   L_names <- paste0("L", 1:15)
   S_names <- paste0("Slider_", 1:30)
 
-  # fehlende Spalten ergänzen
+  # fehlende Spalten als NA ergänzen
   for (nm in c(U_names, L_names, S_names)) if (is.null(df[[nm]])) df[[nm]] <- NA
 
-  to_num <- function(x) suppressWarnings(as.numeric(x))
+  # in Zahl wandeln
   df[U_names] <- lapply(df[U_names], to_num)
   df[L_names] <- lapply(df[L_names], to_num)
   df[S_names] <- lapply(df[S_names], to_num)
 
+  # invertierte Items
   invert_items <- c("U3","U8","U11","U12","U15","U16","U21",
                     "L2","L3","L7","L9","L10","L11","L13")
   invert_items <- intersect(invert_items, names(df))
   if (length(invert_items))
     df[invert_items] <- lapply(df[invert_items], function(x) ifelse(is.na(x), NA, 6 - x))
 
+  # Skalen
   df$Unternehmerfaehigkeit <- rowMeans(df[paste0("U", 1:22)], na.rm = TRUE)
   df$Leistungsmotivation   <- rowMeans(df[paste0("L", 1:15)], na.rm = TRUE)
 
+  # Rollen-Cluster (Slider-Index → Mittelwert)
   rollen_cluster <- list(
     Verkaeufer          = c(1, 10, 14, 20, 30),
     Finance_Coordinator = c(1, 10, 11, 14, 15, 20, 24, 30),
@@ -56,33 +71,41 @@ analyze_payload <- function(req_json) {
 
   rollen_spalten <- names(rollen_cluster)
   df$Dominante_Rolle <- apply(df[, rollen_spalten, drop = FALSE], 1, function(x) {
-    if (all(is.na(x))) return(NA_character_); names(x)[which.max(x)]
+    if (all(is.na(x))) return(NA_character_)
+    names(x)[which.max(x)]
   })
 
-  ergebnis <- df[, c("ID", "Unternehmerfaehigkeit", "Leistungsmotivation", rollen_spalten, "Dominante_Rolle")]
+  ergebnis <- df[, c("ID", "Unternehmerfaehigkeit", "Leistungsmotivation",
+                     rollen_spalten, "Dominante_Rolle")]
 
   list(ok = TRUE, ergebnis = ergebnis)
 }
 
-# ---- Healthcheck ----
+# ─────────────────────────────────────────────────────────────────────────────
+# Healthcheck
 #* @get /health
-function(){ list(status="ok", time=as.character(Sys.time())) }
+function() {
+  list(status = "ok", time = as.character(Sys.time()))
+}
 
-# ---- Analyse-Endpunkt ----
+# ─────────────────────────────────────────────────────────────────────────────
+# Analyse-Endpunkt (POST!)
 #* @post /analyze
-function(req, res){
+function(req, res) {
   tryCatch({
-    body <- req$body %||% req$postBody  # je nach plumber-Version
-    result <- analyze_payload(body)
+    # Body robust holen (kann raw, char oder list sein)
+    body_raw <- if (!is_blank(req$postBody)) req$postBody else req$body
+    if (is.raw(body_raw)) body_raw <- rawToChar(body_raw)
 
-    # ========== DEBUG-PHASE ==========
-    # Während wir testen, NUR JSON zurückgeben.
-    # Wenn das stabil läuft, den unteren Render-Block aktivieren.
+    result <- analyze_payload(body_raw)
+
+    # ── DEBUG-PHASE: nur JSON zurückgeben ────────────────────────────────────
     return(result)
 
-    # ========== REPORT-PHASE (später aktivieren) ==========
+    # ── REPORT-PHASE (später aktivieren): HTML rendern und Base64 liefern ───
     # tmp <- tempfile(fileext = ".html")
-    # rmarkdown::render("onepager.Rmd",
+    # rmarkdown::render(
+    #   "onepager.Rmd",
     #   params = list(ergebnis = result$ergebnis),
     #   output_file = tmp, quiet = TRUE
     # )
@@ -91,8 +114,8 @@ function(req, res){
     #   mime = "text/html",
     #   content_base64 = base64enc::base64encode(tmp)
     # )
-  }, error = function(e){
+  }, error = function(e) {
     res$status <- 400
-    list(ok=FALSE, error=as.character(e))
+    list(ok = FALSE, error = as.character(e))
   })
 }
